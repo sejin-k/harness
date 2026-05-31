@@ -2,13 +2,15 @@ project: demo-service
 # repo 미지정 시 projects/demo-service 자체를 레포로 사용
 service:
   run: ""
-  health_check: ""
+  # 헬스체크: 배포 마커가 생겼고 테스트가 통과하는지 확인 (쉘 명령, rc=0이면 통과)
+  health_check: 'test -f .release && python3 -m unittest discover -p "test_*.py"'
   migrate: ""
 commands:
   build: ""                                  # 데모는 별도 빌드 없음
   lint: ""                                   # 린트 도구 미설정
   test: 'python3 -m unittest discover -p "test_*.py"'
-  deploy: ""                                 # 배포는 MVP 범위 밖
+  # 배포: 릴리스 마커 생성 (실제 서비스라면 ./deploy.sh prod 등)
+  deploy: 'date -u +%Y-%m-%dT%H:%M:%SZ > .release && echo "released $(cat .release)"'
 gates:
   test:
     require_pass: true

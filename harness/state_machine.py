@@ -170,6 +170,16 @@ def advance(item_id: str) -> dict[str, Any]:
     state.append_event(item_id, "phase_done",
                        {"phase": phase_name, "commit": commit, "next": nxt})
 
+    # DONE 도달 시 worktree 자동 정리 (best-effort).
+    # 브랜치/커밋은 보존되고 산출물은 INTEGRATE에서 이미 트렁크에 반영됐다.
+    # 정리 실패는 DONE 전이를 막지 않는다 (housekeeping이므로).
+    if nxt == "DONE":
+        try:
+            removed = worktree.remove_worktree(main_repo, item["project"], item_id)
+            state.append_event(item_id, "worktree_cleaned", {"removed": removed})
+        except Exception as e:   # noqa: BLE001 — 정리 실패가 완료를 깨면 안 됨
+            state.append_event(item_id, "worktree_cleanup_failed", {"error": repr(e)})
+
     return {"item": item_id, "action": "advanced", "phase": phase_name,
             "state": nxt, "commit": commit, "cost_usd": run.cost_usd,
             "detail": gate.detail}

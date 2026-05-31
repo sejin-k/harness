@@ -39,7 +39,8 @@
 - ✅ **[P1] main 병합 / PR 생성** — INTEGRATE 단계로 구현(`integrate.mode: direct|pr`). 게이트 통과 브랜치를 트렁크에 반영.
 - ✅ [P2] 회귀 방지 — direct 병합 시 병합 결과 기준 전체 테스트 재실행, 실패하면 `merge --abort`.
 - [P2] DEPLOY 강화 — 롤백, 마이그레이션, 블루/그린, 실패 자동복구.
-- [P2] worktree 정리 — DONE 항목 worktree 자동/수동 제거.
+- ✅ [P2] worktree 정리 — DONE 도달 시 `advance()`가 `remove_worktree`를 best-effort 호출(브랜치/커밋 보존). 데모 WI-0001~0005 백필 병합 후 잔여 worktree 정리 완료.
+- ✅ [robustness] INTEGRATE actuator가 더러운 트렁크에 견고 — 병합 전·abort 시 `reset --hard HEAD`+`clean`으로 pristine 보장(회귀 테스트가 만든 `.pyc` 잔여로 다음 병합이 막히던 버그 수정).
 - [P3] PR 모드 보강 — NEEDS_HUMAN(PR 대기) 상태에서 `hctl approve` 시 INTEGRATE 재실행으로 PR 중복 생성될 수 있음(전용 처리 필요). 원격 없는 데모에선 direct만 검증됨.
 
 ### C. 알림 — *무인 운영 시 사람을 부르는 신호*

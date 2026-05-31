@@ -329,11 +329,22 @@ def _trunk_ref(repo: Path) -> str:
     return out.strip() or "HEAD"
 
 
-def _abort_merge(main_repo: Path) -> None:
-    """진행 중 머지를 되돌리고 트렁크 작업트리를 HEAD 상태로 깨끗이 복원한다.
-    (--abort는 tracked만 복원하므로, 머지가 새로 가져온 untracked 파일은 clean으로 제거)"""
-    run_shell("git merge --abort", main_repo)
+def _reset_trunk(main_repo: Path) -> None:
+    """트렁크 작업트리를 HEAD 기준 pristine 상태로 강제한다.
+
+    하네스 불변식상 메인 레포 작업트리에는 커밋되지 않은 '정상 작업'이 없다(모든 작업은
+    worktree에서). 하지만 회귀 테스트를 트렁크에서 돌리면 .pyc 등 부산물이 생겨 다음 병합이
+    'local changes would be overwritten'으로 막힐 수 있다. reset --hard(추적 파일 복원) +
+    clean(미추적 제거)으로 이를 제거한다. merge --abort는 추적-수정 파일을 복원하지 못하므로
+    abort 경로에서도 이 함수를 쓴다."""
+    run_shell(f"git {_GIT_ID} reset -q --hard HEAD", main_repo)
     run_shell("git clean -fdq", main_repo)
+
+
+def _abort_merge(main_repo: Path) -> None:
+    """진행 중 머지를 되돌리고 트렁크를 HEAD 기준 pristine 상태로 복원한다."""
+    run_shell("git merge --abort", main_repo)
+    _reset_trunk(main_repo)
 
 
 def _integrate_direct(ctx: PhaseContext, main_repo: Path, branch: str,
@@ -341,6 +352,8 @@ def _integrate_direct(ctx: PhaseContext, main_repo: Path, branch: str,
     """브랜치를 트렁크에 직접 병합한다. 회귀 테스트 통과 시에만 머지를 확정."""
     trunk = _trunk_ref(main_repo)
     run_shell(f"git {_GIT_ID} checkout -q {trunk}", main_repo)
+    # 병합 전 트렁크 작업트리를 깨끗이 보장 (직전 회귀 테스트의 .pyc 잔여 등 제거)
+    _reset_trunk(main_repo)
 
     # --no-commit: 회귀 테스트가 통과해야만 머지 커밋을 만든다.
     rc, out = run_shell(f"git {_GIT_ID} merge --no-ff --no-commit {branch}", main_repo)

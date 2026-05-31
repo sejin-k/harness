@@ -60,7 +60,7 @@
 | `queue.jsonl` | 요구사항 인입 로그 | append-only |
 | `index.json` | 전체 조회용 요약 | 파생 캐시 (손상 시 `reindex`로 복원) |
 | `.lock` | `flock` 직렬화용 빈 파일 | 동시성 |
-| `worktrees/<proj>/<item>/` | 항목별 격리 작업 디렉토리 | git worktree (자동 정리 미구현) |
+| `worktrees/<proj>/<item>/` | 항목별 격리 작업 디렉토리 | git worktree (DONE 도달 시 `state_machine`이 자동 정리; 브랜치/커밋은 보존) |
 
 ---
 

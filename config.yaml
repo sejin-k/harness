@@ -1,0 +1,7 @@
+# 하네스 글로벌 설정
+model: ""                       # 빈 값이면 claude CLI 기본 모델 사용
+permission_mode: bypassPermissions   # 격리 브랜치 내 자율 실행 (배포만 사람 승인)
+max_attempts: 2                 # 게이트 실패 시 단계 재시도 횟수
+max_review_rounds: 2            # 리뷰어 변경요청 수정 사이클 한도
+runner_timeout_sec: 1200        # 단계별 에이전트 호출 타임아웃(초)
+workers: 2                      # 동시 처리 워커 풀 크기 (hctl run --loop --workers 로 재정의)

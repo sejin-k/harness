@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""hctl — 하네스 컨트롤 CLI.
+
+진행 상황/상태를 *스크립트로* 다루는 단일 진입점. (문서·프롬프트가 아님)
+
+  hctl add <project> "<요구사항>" [--priority N]   요구사항 등록
+  hctl run [--item WI-0001] [--loop] [--max N]      한 단계(또는 루프) 전진
+  hctl status [--item WI-0001]                       상태 조회
+  hctl log <WI-0001>                                 이벤트 타임라인
+  hctl approve <WI-0001>                             NEEDS_HUMAN 승인·재개
+  hctl projects                                      프로젝트 목록
+  hctl reindex                                       index.json 복구
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from harness import config, state, state_machine  # noqa: E402
+
+
+def cmd_add(args) -> int:
+    if args.project not in config.list_projects():
+        print(f"[!] 알 수 없는 프로젝트: {args.project}")
+        print(f"    사용 가능: {', '.join(config.list_projects()) or '(없음)'}")
+        return 1
+    item = state.create_work_item(args.project, args.requirement, args.priority)
+    print(f"[+] 등록됨: {item['id']}  project={item['project']}  state={item['state']}")
+    print(f"    요구사항: {item['requirement']}")
+    return 0
+
+
+def _print_result(res: dict) -> None:
+    action = res.get("action")
+    icon = {"advanced": "✓", "retry": "↻", "needs_human": "✋",
+            "error": "✗", "skip": "·", "noop": "·",
+            "review_changes": "↩", "awaiting_approval": "✋"}.get(action, "?")
+    line = f"  {icon} {res.get('item', '?')}  {action}  state={res.get('state')}"
+    if res.get("phase"):
+        line += f"  phase={res['phase']}"
+    if res.get("commit"):
+        line += f"  commit={res['commit']}"
+    if res.get("cost_usd"):
+        line += f"  ${res['cost_usd']:.4f}"
+    if action == "review_changes" and res.get("round"):
+        line += f"  (리뷰 라운드 {res['round']})"
+    print(line)
+    if res.get("detail"):
+        print(f"       {res['detail']}")
+    if res.get("reason"):
+        print(f"       사유: {res['reason']}")
+
+
+def cmd_run(args) -> int:
+    if args.loop:
+        workers = args.workers or int(config.load_global().get("workers", 2))
+        print(f"[>] 동시 처리 루프 시작 (workers={workers}, max={args.max}) ...")
+        summary = state_machine.run_loop(workers=workers, max_steps=args.max,
+                                         on_result=_print_result)
+        print(f"[=] 루프 종료 — {summary['steps']}개 단계 전진 처리.")
+        return 0
+
+    item_id = args.item or state_machine.pick_next()
+    if not item_id:
+        print("[=] 처리할 작업 없음.")
+        return 0
+    if not state.item_exists(item_id):
+        print(f"[!] 없는 작업 항목: {item_id}")
+        return 1
+    print(f"[>] {item_id} 전진 중 ...")
+    _print_result(state_machine.advance(item_id))
+    return 0
+
+
+def cmd_status(args) -> int:
+    if args.item:
+        if not state.item_exists(args.item):
+            print(f"[!] 없는 작업 항목: {args.item}")
+            return 1
+        item = state.load_item(args.item)
+        print(f"  {item['id']}  [{item['state']}]  project={item['project']}  branch={item['branch']}")
+        print(f"  요구사항: {item['requirement']}")
+        print(f"  시도: {item['attempts']}")
+        if item.get("pending_phase"):
+            print(f"  ✋ 승인 대기: {item['pending_phase']}  (hctl approve {item['id']})")
+        if item.get("approvals"):
+            print(f"  승인됨: {list(item['approvals'].keys())}")
+        if item.get("last_error"):
+            print(f"  마지막 오류: {item['last_error']}")
+        for ph, art in (item.get("artifacts") or {}).items():
+            print(f"  - {ph}: commit={art.get('commit')}  ${art.get('cost_usd', 0):.4f}  ({art.get('gate_detail')})")
+        return 0
+
+    idx = state.load_index()
+    items = idx["items"]
+    if not items:
+        print("(작업 항목 없음)")
+        return 0
+    print(f"{'ID':<9} {'STATE':<12} {'PROJ':<16} REQUIREMENT")
+    print("-" * 70)
+    for it in items:
+        print(f"{it['id']:<9} {it['state']:<12} {it['project'][:15]:<16} {it['requirement']}")
+    print(f"\n총 {idx['count']}건  (index {idx['generated_at']})")
+    return 0
+
+
+def cmd_log(args) -> int:
+    if not state.item_exists(args.item):
+        print(f"[!] 없는 작업 항목: {args.item}")
+        return 1
+    for ev in state.read_events(args.item):
+        data = ev.get("data", {})
+        extra = ""
+        if "phase" in data:
+            extra += f" phase={data['phase']}"
+        if "passed" in data:
+            extra += f" passed={data['passed']}"
+        if "detail" in data:
+            extra += f" — {data['detail']}"
+        if "reason" in data:
+            extra += f" — {data['reason']}"
+        print(f"{ev['ts']}  {ev['kind']:<14}{extra}")
+    return 0
+
+
+def cmd_approve(args) -> int:
+    if not state.item_exists(args.item):
+        print(f"[!] 없는 작업 항목: {args.item}")
+        return 1
+    res = state_machine.approve(args.item)
+    print(f"[✓] {res['action']}  {args.item}  → state={res.get('state')}")
+    if res.get("reason"):
+        print(f"    {res['reason']}")
+    return 0
+
+
+def cmd_projects(args) -> int:
+    projs = config.list_projects()
+    if not projs:
+        print("(등록된 프로젝트 없음 — projects/<name>/harness.yaml 필요)")
+        return 0
+    for p in projs:
+        cfg = config.load_project(p)
+        print(f"  {p:<20} repo={cfg['repo']}  test='{cfg['commands'].get('test', '')}'")
+    return 0
+
+
+def cmd_reindex(args) -> int:
+    idx = state.reindex()
+    print(f"[✓] index.json 재생성: {idx['count']}건")
+    return 0
+
+
+def cmd_worktrees(args) -> int:
+    from harness import worktree
+    projs = [args.project] if args.project else config.list_projects()
+    for p in projs:
+        cfg = config.load_project(p)
+        print(f"[{p}]  (concurrency={cfg.get('concurrency', 1)})")
+        print(worktree.list_worktrees(Path(cfg["repo"])).rstrip())
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="hctl", description="개발 하네스 컨트롤 CLI")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    a = sub.add_parser("add", help="요구사항 등록")
+    a.add_argument("project")
+    a.add_argument("requirement")
+    a.add_argument("--priority", type=int, default=100)
+    a.set_defaults(func=cmd_add)
+
+    r = sub.add_parser("run", help="한 단계(또는 루프) 전진")
+    r.add_argument("--item", help="특정 작업 항목 (생략 시 큐에서 자동 선택)")
+    r.add_argument("--loop", action="store_true", help="처리할 작업이 없을 때까지 반복")
+    r.add_argument("--max", type=int, default=50, help="루프 최대 스텝")
+    r.add_argument("--workers", type=int, default=None,
+                   help="동시 처리 워커 수 (기본: config.yaml workers)")
+    r.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("status", help="상태 조회")
+    s.add_argument("--item", help="특정 작업 항목 상세")
+    s.set_defaults(func=cmd_status)
+
+    lg = sub.add_parser("log", help="이벤트 타임라인")
+    lg.add_argument("item")
+    lg.set_defaults(func=cmd_log)
+
+    ap = sub.add_parser("approve", help="NEEDS_HUMAN 승인·재개")
+    ap.add_argument("item")
+    ap.set_defaults(func=cmd_approve)
+
+    sub.add_parser("projects", help="프로젝트 목록").set_defaults(func=cmd_projects)
+    sub.add_parser("reindex", help="index.json 복구").set_defaults(func=cmd_reindex)
+
+    wt = sub.add_parser("worktrees", help="git worktree 목록 (동시 처리 격리)")
+    wt.add_argument("project", nargs="?", help="특정 프로젝트 (생략 시 전체)")
+    wt.set_defaults(func=cmd_worktrees)
+    return p
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

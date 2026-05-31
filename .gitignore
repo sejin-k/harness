@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# 하네스 런타임 상태 (스크립트가 생성·관리하는 진실 원천 — 소스 아님)
+/state/
+
+# 데모 대상 레포의 자체 git 메타데이터 (로컬에서는 별도 레포로 유지)
+/projects/demo-service/.git/
+/projects/demo-service/.git.disabled/

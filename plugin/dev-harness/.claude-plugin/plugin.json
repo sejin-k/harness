@@ -1,0 +1,6 @@
+{
+  "name": "dev-harness",
+  "description": "요구사항을 설계→구현→테스트→리뷰→트렁크병합까지 자동 수행하는 결정적 개발 하네스. 상태는 사용자 홈(${CLAUDE_PLUGIN_DATA}), 설정은 프로젝트의 harness.yaml.",
+  "version": "0.1.0",
+  "author": { "name": "harness" }
+}

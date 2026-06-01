@@ -1,13 +1,15 @@
 # 진행 현황 (PROGRESS)
 
-> 최종 갱신: 2026-05-31
+> 최종 갱신: 2026-06-01
 > 이 문서는 사람이 읽는 로드맵/진행 기록이다. (런타임 상태는 `state/`의 스크립트가 관리)
 
 ## 한눈에 보기
 
 - 핵심 파이프라인 **7단계 전부 동작**: SPEC → DESIGN → IMPLEMENT → TEST → REVIEW → **INTEGRATE** → DEPLOY
-- 코드 규모: 하네스 본체 약 1,520줄 (Python 8파일 + `hctl` CLI)
-- 검증: 데모 작업 항목 **5건 전부 DONE** (동시 처리 포함) + INTEGRATE 트렁크 병합 검증(WI-0001 실제 `main` 반영)
+- 코드 규모: 하네스 본체 약 1,700줄 (Python 8파일 + `hctl` CLI) + 플러그인 스캐폴드
+- 검증: 데모 작업 항목 **5건 전부 DONE** + **5건 모두 실제 `main` 병합 완료**(INTEGRATE 백필)
+- **Claude Code 플러그인 전환(얇은 래퍼) 완료** — 상태=사용자 홈(`${CLAUDE_PLUGIN_DATA}`), 설정=프로젝트 `harness.yaml`
+- 전체 코드 흐름 문서: [`docs/CODE-FLOW.md`](./docs/CODE-FLOW.md) (함수/클래스 단위 + mermaid + 중단/재개)
 
 ---
 
@@ -24,6 +26,9 @@
 | 7 | Agent Runner (claude CLI 헤드리스, 단계별 도구 제한) | `harness/runner.py` | 전 항목 |
 | 8 | CLI (add/run/status/log/approve/projects/reindex/worktrees) | `hctl` | — |
 | 9 | 트렁크 반영 INTEGRATE 단계 (direct 병합/PR, 회귀 테스트, 충돌·실패 시 abort) | `phases.py` (`_integrate_*`) | WI-0001 실제 `main` 병합 + 회귀 그린, 회귀실패·충돌 abort 단위검증 |
+| 10 | worktree 자동 정리 (DONE 시 best-effort 제거, 브랜치 보존) | `state_machine.advance` | 데모 WI-0004·0005 정리, WI-0001~0005 전부 `main` 백필 |
+| 11 | **플러그인 전환(얇은 래퍼)** — 엔진/상태 경로 분리, cwd/플러그인 모드, `plugin/dev-harness/` | `state.py`·`config.py`·`worktree.py`·`hctl`·`plugin/` | `claude plugin validate` ✔, 런처로 상태가 `CLAUDE_PLUGIN_DATA`에 생성됨 확인 |
+| 12 | `hctl init` 스캐폴딩 — 스택별 명령 감지·`service` 블록·드라이런·git확인·깨진 yaml 친절처리 | `config.scaffold_project_yaml`·`detect_commands`·`hctl cmd_init` | Node/Python/Go… 감지, `--force` 백업, 오타키 경고 검증 |
 
 ---
 
@@ -65,22 +70,28 @@
 
 ### G. 멀티 프로젝트
 - [P2] 여러 레포 동시 운영 검증 + 도구.
-- [P2] `hctl init <project>` 스캐폴딩 + config 검증.
+- ✅ [P2] `hctl init` 스캐폴딩 + config 검증 — 스택 감지·`service` 블록·드라이런·`validate_project_yaml`·`--force` 백업. (cwd/플러그인 모드는 경로해시 id로 멀티 프로젝트 자연 지원)
 
 ### H. 사용성/하우스키핑
 - [P3] `hctl cancel/requeue`, 우선순위 변경, dry-run.
 - [P3] 린트 정리 — `hctl`의 미사용 `args` 경고 2건(`cmd_projects`, `cmd_reindex`).
-- [검토됨/미착수] **Claude Code Skill 래핑** — `hctl`을 `.claude/skills/dev-harness/SKILL.md`로
-  감싸 자연어로 운영 가능(검토 완료, 권장). 이름 `harness`는 기존 마켓플레이스 스킬과 충돌하므로
-  `dev-harness` 사용. 중첩 `claude` 실행/비용 주의, `run --loop`은 백그라운드 권장.
+
+### I. Claude Code 플러그인화 — *배포·실행 형태* (설계 확정, 얇은 래퍼 완료)
+하네스는 어차피 Claude 환경 필수(`runner.py`가 `claude -p` 호출) → 플러그인이 가장 자연스러운 배포·실행 계층.
+상태=`${CLAUDE_PLUGIN_DATA}`(사용자 홈), 설정=프로젝트 `harness.yaml` 커밋. **결정적 코어(상태머신·게이트·`state.py`)는 보존.**
+- ✅ **얇은 래퍼** — 엔진/상태 경로 분리(env 기반 `DATA_ROOT`), cwd/플러그인 모드(`load_project_at`/`project_dir`), `plugin/dev-harness/`(`plugin.json`·`bin/hctl` 런처·`commands/{add,run,status,approve,init}.md`). `claude plugin validate` 통과.
+- [P2] 풀구성 — REVIEW 독립 리뷰어를 `agents/` 서브에이전트로(읽기전용 도구제한), NEEDS_HUMAN **모니터 알림**(C 흡수), 단계 페르소나를 `agents/*.md`로 단일화하고 러너가 `claude -p --agent`로 적용(동작 동일·표현 정리).
+- **[P1] 전용 trunk 워크트리** — 내장형에선 INTEGRATE의 `reset --hard`가 사용자 작업 폴더를 건드릴 위험. 병합을 전용 trunk 워크트리에서 수행해 사용자 작업트리를 격리.
+- [P2] 엔진 동봉을 심링크→복사(빌드), 마켓플레이스 배포.
+- ⚠️ 미해결: 중첩 `claude` 실행(비용 2겹, `run --loop`은 백그라운드), 완전 무인은 여전히 데몬/`/schedule` 필요.
 
 ---
 
 ## 권장 다음 순서
 
-~~B(결과 반영)~~ ✅ 완료 → 남은 우선순위: **C(알림) → A(자동화) → D(자체 테스트)**
+~~B(결과 반영)~~ ✅ · ~~플러그인 얇은 래퍼(I)~~ ✅ → 남은 우선순위: **I 풀구성 → C(알림) → A(자동화) → D(자체 테스트)**
 
-1. ✅ ~~main 병합/PR — 결과가 트렁크에 반영되어야 사이클이 완결~~ (INTEGRATE 단계로 닫음)
-2. NEEDS_HUMAN 알림 — 무인 중 막히면 사람 호출 (승인 대기·실패·INTEGRATE 충돌 시 푸시)
+1. ✅ ~~main 병합/PR~~ (INTEGRATE) · ✅ ~~worktree 자동정리~~ · ✅ ~~플러그인 얇은 래퍼·`hctl init`~~
+2. **플러그인 풀구성** — 우선 **전용 trunk 워크트리**(I, `reset --hard`가 사용자 폴더 건드리는 위험 제거)가 [P1]. 이어 REVIEW 서브에이전트 + NEEDS_HUMAN 모니터 알림(C 흡수).
 3. 데몬화 + 요구사항 자동 인입 — 사람 개입 없이 순환
-4. 하네스 자체 테스트 — 위를 신뢰성 있게 운영하는 안전망 (INTEGRATE actuator 단위 테스트부터 코드화 권장)
+4. 하네스 자체 테스트 — 위를 신뢰성 있게 운영하는 안전망 (INTEGRATE actuator·스캐폴딩 단위 테스트부터 코드화 권장)

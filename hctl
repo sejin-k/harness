@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -24,11 +25,42 @@ from harness import config, state, state_machine  # noqa: E402
 
 
 def cmd_add(args) -> int:
-    if args.project not in config.list_projects():
-        print(f"[!] 알 수 없는 프로젝트: {args.project}")
-        print(f"    사용 가능: {', '.join(config.list_projects()) or '(없음)'}")
+    # 위치 인자 정리: cwd/플러그인 모드에선 project를 생략하므로 한 개만 오면 requirement로 본다.
+    project, requirement = args.project, args.requirement
+    if requirement is None:
+        project, requirement = None, project
+    if requirement is None:
+        print("[!] 요구사항이 필요하다.  예) hctl add \"<요구사항>\"  또는  hctl add <project> \"<요구사항>\"")
         return 1
-    item = state.create_work_item(args.project, args.requirement, args.priority)
+
+    proj_dir = args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR")
+    # cwd/플러그인 모드: --project-dir/CLAUDE_PROJECT_DIR이 있거나, project 미지정·미등록일 때
+    if proj_dir or project is None or project not in config.list_projects():
+        d = Path(proj_dir or Path.cwd()).expanduser().resolve()
+        # 첫 실행: harness.yaml이 없으면 기본 설정을 자동 생성(스캐폴드)
+        cfg_path, created = config.scaffold_project_yaml(d)
+        if created:
+            detected = config.detect_commands(d).get("test", "")
+            print(f"[+] harness.yaml 자동 생성: {cfg_path}")
+            print(f"    추론된 test 명령: {detected or '(없음 — 직접 채워주세요)'}")
+            print("    빌드/배포 명령은 비어 있을 수 있습니다. run 전에 검토·수정하세요.")
+        # 깨진 설정이면 raw traceback 대신 친절 안내
+        ok, msg = config.validate_project_yaml(cfg_path)
+        if not ok:
+            print(f"[!] harness.yaml 오류: {msg}")
+            print("    파일을 수정하거나 `hctl init --force`로 새로 생성하세요.")
+            return 1
+        if msg:
+            print(f"[주의] harness.yaml: {msg}")
+        pcfg = config.load_project_at(d)
+        item = state.create_work_item(pcfg["project"], requirement,
+                                      args.priority, project_dir=str(d))
+        print(f"[+] 등록됨: {item['id']}  project={item['project']}  dir={d}")
+        print(f"    요구사항: {item['requirement']}")
+        return 0
+
+    # 레거시: projects/<name>/harness.yaml
+    item = state.create_work_item(project, requirement, args.priority)
     print(f"[+] 등록됨: {item['id']}  project={item['project']}  state={item['state']}")
     print(f"    요구사항: {item['requirement']}")
     return 0
@@ -138,6 +170,55 @@ def cmd_approve(args) -> int:
     return 0
 
 
+def _dryrun(cmd: str, cwd: Path, timeout: int = 60) -> int:
+    """명령을 한 번 실행해 종료코드만 반환 (init 검증용)."""
+    import subprocess
+    try:
+        p = subprocess.run(cmd, cwd=str(cwd), shell=True, capture_output=True,
+                           timeout=timeout)
+        return p.returncode
+    except subprocess.TimeoutExpired:
+        return 124
+    except Exception:
+        return 127
+
+
+def cmd_init(args) -> int:
+    proj_dir = args.project_dir or os.environ.get("CLAUDE_PROJECT_DIR") or str(Path.cwd())
+    d = Path(proj_dir).expanduser().resolve()
+    cfg_path, created = config.scaffold_project_yaml(d, overwrite=args.force)
+    if not created:
+        print(f"[·] 이미 존재: {cfg_path}  (덮어쓰려면 --force)")
+        ok, msg = config.validate_project_yaml(cfg_path)
+        if not ok:
+            print(f"    [!] 설정 오류: {msg}  — 고치거나 --force로 재생성")
+            return 1
+        if msg:
+            print(f"    [주의] {msg}")
+        return 0
+
+    cmds = config.detect_commands(d)
+    print(f"[+] harness.yaml 생성: {cfg_path}")
+    print(f"    추론: test='{cmds['test']}'  build='{cmds['build']}'  lint='{cmds['lint']}'")
+
+    # ④ git 전제조건 (하네스는 worktree 격리에 git이 필요)
+    g = config.git_status(d)
+    if not g["is_repo"]:
+        print("    [!] git 레포가 아님 — 하네스는 git이 필요하다.")
+        print(f"        예) git -C \"{d}\" init -b main && git -C \"{d}\" commit --allow-empty -m init")
+    elif not g["has_commit"]:
+        print("    [!] 커밋이 없음 — 트렁크 기준점이 될 최소 1개 커밋이 필요하다.")
+
+    # ③ test 드라이런 (잘못된 추론·환경 문제 조기 발견)
+    if not args.no_check and cmds["test"]:
+        rc = _dryrun(cmds["test"], d)
+        print(f"    [>] test 드라이런: {cmds['test']}  → rc={rc}"
+              + ("  (통과)" if rc == 0 else "  (실패 — 명령/환경 확인)"))
+
+    print("    build/deploy/health_check 등은 비어 있을 수 있다 — 검토 후 커밋하세요.")
+    return 0
+
+
 def cmd_projects(args) -> int:
     projs = config.list_projects()
     if not projs:
@@ -170,8 +251,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     a = sub.add_parser("add", help="요구사항 등록")
-    a.add_argument("project")
-    a.add_argument("requirement")
+    a.add_argument("project", nargs="?",
+                   help="레거시 등록명(projects/<name>). cwd/플러그인 모드에선 생략")
+    a.add_argument("requirement", nargs="?")
+    a.add_argument("--project-dir", dest="project_dir",
+                   help="프로젝트 디렉토리(플러그인/cwd 모드). 기본: $CLAUDE_PROJECT_DIR 또는 현재 위치")
     a.add_argument("--priority", type=int, default=100)
     a.set_defaults(func=cmd_add)
 
@@ -194,6 +278,13 @@ def build_parser() -> argparse.ArgumentParser:
     ap = sub.add_parser("approve", help="NEEDS_HUMAN 승인·재개")
     ap.add_argument("item")
     ap.set_defaults(func=cmd_approve)
+
+    it = sub.add_parser("init", help="프로젝트에 harness.yaml 생성 (스캐폴드)")
+    it.add_argument("--project-dir", dest="project_dir",
+                    help="프로젝트 디렉토리 (기본: $CLAUDE_PROJECT_DIR 또는 현재 위치)")
+    it.add_argument("--force", action="store_true", help="기존 harness.yaml 덮어쓰기 (.bak 백업)")
+    it.add_argument("--no-check", action="store_true", help="test 드라이런 생략")
+    it.set_defaults(func=cmd_init)
 
     sub.add_parser("projects", help="프로젝트 목록").set_defaults(func=cmd_projects)
     sub.add_parser("reindex", help="index.json 복구").set_defaults(func=cmd_reindex)

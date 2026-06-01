@@ -16,9 +16,9 @@ import threading
 from pathlib import Path
 
 from .phases import run_shell
-from .state import HARNESS_HOME
+from .state import STATE_DIR
 
-WORKTREES_DIR = HARNESS_HOME / "state" / "worktrees"
+WORKTREES_DIR = STATE_DIR / "worktrees"   # DATA_ROOT 아래 (상태와 함께 사용자 홈/플러그인 데이터로 이동)
 
 _GIT_ID = "-c user.email=harness@local -c user.name=harness"
 _wt_lock = threading.Lock()   # worktree add/remove 직렬화

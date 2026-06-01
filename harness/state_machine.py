@@ -58,7 +58,7 @@ def advance(item_id: str) -> dict[str, Any]:
                 "reason": item["last_error"]}
 
     gcfg = config.load_global()
-    pcfg = config.load_project(item["project"])
+    pcfg = config.load_project_auto(item)
     main_repo = Path(pcfg["repo"])
 
     # 승인 게이트(단계 실행 *전*): require_human이고 아직 미승인이면 멈춘다.

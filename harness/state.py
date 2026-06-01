@@ -27,8 +27,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-HARNESS_HOME = Path(__file__).resolve().parents[1]
-STATE_DIR = HARNESS_HOME / "state"
+# 엔진 코드·prompts·기본설정 위치 (구 HARNESS_HOME). 플러그인에선 ${CLAUDE_PLUGIN_ROOT}.
+# 절대 여기에 런타임 상태를 쓰지 않는다 (플러그인 업데이트 시 교체됨).
+ENGINE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolve_data_root() -> Path:
+    """상태·worktree를 둘 루트. 우선순위:
+      1) 명시 override / 플러그인 영속 디렉토리 (${CLAUDE_PLUGIN_DATA}, 사용자 홈)
+      2) 레거시: 하네스 레포 안에서 직접 실행 → 기존 ./state 보존
+      3) 기본: ~/.harness
+    """
+    env = os.environ.get("HARNESS_DATA_HOME") or os.environ.get("CLAUDE_PLUGIN_DATA")
+    if env:
+        return Path(env).expanduser().resolve()
+    if (ENGINE_ROOT / "state").exists():
+        return ENGINE_ROOT
+    return (Path.home() / ".harness").resolve()
+
+
+DATA_ROOT = _resolve_data_root()
+# 하위호환 별칭: config(projects/, config.yaml)·phases(prompts/)가 엔진 위치로 참조한다.
+HARNESS_HOME = ENGINE_ROOT
+STATE_DIR = DATA_ROOT / "state"
 WORK_ITEMS_DIR = STATE_DIR / "work_items"
 EVENTS_DIR = STATE_DIR / "events"
 QUEUE_FILE = STATE_DIR / "queue.jsonl"
@@ -95,13 +116,19 @@ def _next_id() -> str:
     return f"WI-{max_n + 1:04d}"
 
 
-def create_work_item(project: str, requirement: str, priority: int = 100) -> dict[str, Any]:
-    """요구사항을 큐에 등록하고 새 작업 항목을 생성한다."""
+def create_work_item(project: str, requirement: str, priority: int = 100,
+                     project_dir: str | None = None) -> dict[str, Any]:
+    """요구사항을 큐에 등록하고 새 작업 항목을 생성한다.
+
+    project_dir이 주어지면 cwd/플러그인 모드(프로젝트 디렉토리 자체가 레포, harness.yaml은 거기서 읽음).
+    None이면 레거시 모드(projects/<name>/harness.yaml).
+    """
     with _lock():
         item_id = _next_id()
         item = {
             "id": item_id,
             "project": project,
+            "project_dir": project_dir,
             "requirement": requirement,
             "priority": priority,
             "state": "QUEUED",

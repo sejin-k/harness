@@ -34,21 +34,17 @@ ENGINE_ROOT = Path(__file__).resolve().parents[1]
 
 def _resolve_data_root() -> Path:
     """상태·worktree를 둘 루트. 우선순위:
-      1) 명시 override / 플러그인 영속 디렉토리 (${CLAUDE_PLUGIN_DATA}, 사용자 홈)
-      2) 레거시: 하네스 레포 안에서 직접 실행 → 기존 ./state 보존
-      3) 기본: ~/.harness
+      1) 명시 override / 플러그인 영속 디렉토리 (${CLAUDE_PLUGIN_DATA})
+      2) 기본: ~/.harness
     """
     env = os.environ.get("HARNESS_DATA_HOME") or os.environ.get("CLAUDE_PLUGIN_DATA")
     if env:
         return Path(env).expanduser().resolve()
-    if (ENGINE_ROOT / "state").exists():
-        return ENGINE_ROOT
     return (Path.home() / ".harness").resolve()
 
 
 DATA_ROOT = _resolve_data_root()
-# 하위호환 별칭: config(projects/, config.yaml)·phases(prompts/)가 엔진 위치로 참조한다.
-HARNESS_HOME = ENGINE_ROOT
+HARNESS_HOME = ENGINE_ROOT  # phases.py가 prompts/ 경로로 참조
 STATE_DIR = DATA_ROOT / "state"
 WORK_ITEMS_DIR = STATE_DIR / "work_items"
 EVENTS_DIR = STATE_DIR / "events"

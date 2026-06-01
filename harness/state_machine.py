@@ -250,15 +250,16 @@ def pick_next() -> str | None:
 _PROJECT_CAP_CACHE: dict[str, int] = {}
 
 
-def _project_cap(project: str) -> int:
+def _project_cap(item: dict) -> int:
     """프로젝트별 동시 처리 한도 (harness.yaml의 concurrency)."""
-    if project not in _PROJECT_CAP_CACHE:
+    cache_key = f"{item['project']}::{item.get('project_dir', '')}"
+    if cache_key not in _PROJECT_CAP_CACHE:
         try:
-            _PROJECT_CAP_CACHE[project] = max(1, int(
-                config.load_project(project).get("concurrency", 1)))
+            _PROJECT_CAP_CACHE[cache_key] = max(1, int(
+                config.load_project_auto(item).get("concurrency", 1)))
         except Exception:
-            _PROJECT_CAP_CACHE[project] = 1
-    return _PROJECT_CAP_CACHE[project]
+            _PROJECT_CAP_CACHE[cache_key] = 1
+    return _PROJECT_CAP_CACHE[cache_key]
 
 
 def _select(busy: set[str], active_by_project: dict[str, int]) -> str | None:
@@ -267,7 +268,7 @@ def _select(busy: set[str], active_by_project: dict[str, int]) -> str | None:
              if it["state"] not in TERMINAL and it["id"] not in busy]
     cands.sort(key=lambda it: (it.get("priority", 100), it.get("created_at", "")))
     for it in cands:
-        if active_by_project.get(it["project"], 0) < _project_cap(it["project"]):
+        if active_by_project.get(it["project"], 0) < _project_cap(it):
             return it["id"]
     return None
 

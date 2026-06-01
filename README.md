@@ -168,20 +168,13 @@ state/worktrees/demo-service/WI-0005         # ...
 ./hctl init [--project-dir <dir>] [--force]
 
 # 기타
-./hctl projects        # 프로젝트 목록 (레거시 등록)
 ./hctl worktrees       # worktree 목록
 ./hctl reindex         # index.json 복구
 ```
 
-### 두 가지 운영 모드
-
-| 모드 | 설정 위치 | 등록 명령 | 용도 |
-|------|-----------|-----------|------|
-| **cwd/플러그인** (권장) | 프로젝트 자체의 `harness.yaml` | `hctl add --project-dir <dir> "<요구사항>"` (또는 `$CLAUDE_PROJECT_DIR`) | 임의 프로젝트에서 바로 실행. 상태는 사용자 홈 |
-| **레거시(중앙)** | `projects/<name>/harness.yaml` | `hctl add <name> "<요구사항>"` | 하네스 레포 안에 프로젝트 등록 |
-
-cwd 모드는 `harness.yaml`이 없으면 **첫 `add` 시 자동 생성(스캐폴드)** 한다. project 식별자는 경로 해시로
-자동 부여되어 한 상태 저장소에 여러 프로젝트가 공존한다.
+프로젝트 디렉토리(harness.yaml이 있는 곳)에서 `hctl add "<요구사항>"`을 실행하면 `$CLAUDE_PROJECT_DIR`
+또는 현재 위치를 자동으로 인식한다. `harness.yaml`이 없으면 첫 `add` 시 **자동 스캐폴드** 된다.
+프로젝트 식별자는 경로 해시로 자동 부여되어 한 상태 저장소에 여러 프로젝트가 공존한다.
 
 ### 프로젝트 설정 (`harness.yaml` — 프로젝트 레포에 커밋)
 

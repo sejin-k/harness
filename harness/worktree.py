@@ -3,8 +3,8 @@
 동시 처리의 핵심. 각 작업 항목은 자신의 worktree(별도 작업 트리)에서 처리되어,
 여러 항목을 병렬로 진행해도 작업 트리가 서로 충돌하지 않는다.
 
-- 메인 레포            : projects/<name>           (트렁크: main/master 유지)
-- 항목별 worktree      : state/worktrees/<name>/<item_id>   (브랜치 harness/<item_id>)
+- 메인 레포       : 프로젝트 디렉토리(harness.yaml이 있는 곳)
+- 항목별 worktree : DATA_ROOT/state/worktrees/<item_id>   (브랜치 harness/<item_id>)
 
 worktree add/remove는 메인 레포의 .git 메타데이터를 건드리므로 스레드 락으로 직렬화한다.
 (커밋은 항목마다 다른 브랜치 ref라 git 자체로 안전 → 락 불필요)

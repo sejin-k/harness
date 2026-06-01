@@ -1,4 +1,4 @@
-"""설정 로더 — 글로벌(config.yaml) + 프로젝트별(projects/<name>/harness.yaml).
+"""설정 로더 — 글로벌(config.yaml) + 프로젝트별 harness.yaml (cwd/플러그인 모드).
 
 대상은 '서비스 개발'이므로 프로젝트 설정은 서비스 친화 스키마를 따른다.
 하네스는 여기 선언된 명령(build/test/lint/deploy)을 *실행·판정*만 하며,
@@ -17,10 +17,9 @@ from typing import Any
 
 import yaml
 
-from .state import HARNESS_HOME
+from .state import ENGINE_ROOT
 
-PROJECTS_DIR = HARNESS_HOME / "projects"
-GLOBAL_CONFIG_FILE = HARNESS_HOME / "config.yaml"
+GLOBAL_CONFIG_FILE = ENGINE_ROOT / "config.yaml"
 
 # 글로벌 기본값
 _GLOBAL_DEFAULTS: dict[str, Any] = {
@@ -65,37 +64,6 @@ def load_global() -> dict[str, Any]:
     return cfg
 
 
-def project_config_path(project: str) -> Path:
-    return PROJECTS_DIR / project / "harness.yaml"
-
-
-def load_project(project: str) -> dict[str, Any]:
-    path = project_config_path(project)
-    if not path.exists():
-        raise FileNotFoundError(f"프로젝트 설정 없음: {path}")
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    cfg = _deep_merge(_PROJECT_DEFAULTS, loaded)
-    cfg["project"] = project
-    # repo 경로 정규화 (상대경로면 HARNESS_HOME 기준)
-    repo = cfg.get("repo") or str(PROJECTS_DIR / project)
-    repo_path = Path(repo)
-    if not repo_path.is_absolute():
-        repo_path = (HARNESS_HOME / repo_path).resolve()
-    cfg["repo"] = str(repo_path)
-    return cfg
-
-
-def list_projects() -> list[str]:
-    if not PROJECTS_DIR.exists():
-        return []
-    return sorted(p.name for p in PROJECTS_DIR.iterdir()
-                  if (p / "harness.yaml").exists())
-
-
-# ── cwd/플러그인 모드 ────────────────────────────────────────────────────
-# 레거시는 projects/<name>/harness.yaml(중앙 등록). 플러그인 모드는 프로젝트 디렉토리
-# 자체(${CLAUDE_PROJECT_DIR} 또는 cwd)의 harness.yaml을 읽고, 식별자는 경로에서 유도한다.
-
 def project_id_for(project_dir: str | Path) -> str:
     """프로젝트 디렉토리 경로에서 안정적·충돌없는 식별자를 만든다."""
     p = Path(project_dir).expanduser().resolve()
@@ -119,10 +87,12 @@ def load_project_at(project_dir: str | Path) -> dict[str, Any]:
 
 
 def load_project_auto(item: dict[str, Any]) -> dict[str, Any]:
-    """작업 항목에 맞는 설정을 로드. project_dir이 있으면 cwd/플러그인 모드, 없으면 레거시."""
-    if item.get("project_dir"):
-        return load_project_at(item["project_dir"])
-    return load_project(item["project"])
+    """작업 항목의 project_dir에서 설정을 로드한다."""
+    project_dir = item.get("project_dir")
+    if not project_dir:
+        raise FileNotFoundError(
+            f"project_dir 없음: 항목 {item.get('id')} — 레거시 항목은 hctl add로 재등록 필요")
+    return load_project_at(project_dir)
 
 
 # ── 스캐폴딩 (첫 실행 시 harness.yaml 자동 생성) ───────────────────────────

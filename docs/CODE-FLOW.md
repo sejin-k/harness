@@ -46,7 +46,7 @@ graph TD
 | `cmd_log(args)` | 항목 이벤트 타임라인(`events/*.jsonl`) 출력 |
 | `cmd_approve(args)` | `NEEDS_HUMAN` 항목을 `approve()`로 승인/재개 |
 | `cmd_init(args)` | `harness.yaml` 스캐폴드 + git 전제조건 확인 + test 드라이런 |
-| `cmd_projects/reindex/worktrees` | 레거시 프로젝트 목록 / 인덱스 복구 / worktree 목록 |
+| `cmd_reindex/worktrees` | 인덱스 복구 / worktree 목록 |
 | `_print_result(res)` | `advance`/loop 결과 dict를 사람이 읽는 한 줄로 |
 | `_dryrun(cmd,cwd)` | 명령 1회 실행해 종료코드만 반환(init 검증용) |
 
@@ -55,7 +55,7 @@ graph TD
 | 요소 | 한 줄 설명 |
 |---|---|
 | `ENGINE_ROOT` | 코드·prompts 위치(구 HARNESS_HOME). 상태는 여기 안 씀 |
-| `_resolve_data_root()` / `DATA_ROOT` | 상태 루트 결정: env(`CLAUDE_PLUGIN_DATA`/`HARNESS_DATA_HOME`) → 레거시 in-repo → `~/.harness` |
+| `_resolve_data_root()` / `DATA_ROOT` | 상태 루트 결정: env(`CLAUDE_PLUGIN_DATA`/`HARNESS_DATA_HOME`) → `~/.harness` |
 | `STATE_DIR, WORK_ITEMS_DIR, EVENTS_DIR, QUEUE_FILE, INDEX_FILE, LOCK_FILE` | 상태 파일 경로 상수 |
 | `_atomic_write(path,text)` | **tmp 작성→fsync→os.replace**(원자적). 반쪽 파일 불가 |
 | `_lock()` | `flock` 기반 배타 락 contextmanager (ID/큐/인덱스 직렬화) |
@@ -72,10 +72,9 @@ graph TD
 |---|---|
 | `_deep_merge` | 기본값 위에 사용자 설정을 깊은 병합 |
 | `load_global()` | `config.yaml` + 글로벌 기본값(모델/재시도/워커 등) |
-| `load_project(name)` | **레거시**: `projects/<name>/harness.yaml` 로드, repo 경로 정규화 |
 | `project_id_for(dir)` | 경로 기반 안정 식별자(`이름-해시8`) |
-| `load_project_at(dir)` | **cwd/플러그인**: 디렉토리의 `harness.yaml` 로드, repo=그 디렉토리 |
-| `load_project_auto(item)` | 항목에 `project_dir` 있으면 cwd 모드, 없으면 레거시 |
+| `load_project_at(dir)` | 디렉토리의 `harness.yaml` 로드, repo=그 디렉토리 |
+| `load_project_auto(item)` | 항목의 `project_dir`에서 설정 로드(`project_dir` 없으면 오류) |
 | `detect_commands(dir)` | 스택 감지(node scripts/python/go/rust/java/.net/elixir/ruby/php + Makefile)로 명령 추론 |
 | `friendly_project_name(dir)` | 디렉토리명 기반 표시 이름 |
 | `validate_project_yaml(path)` | `(ok, message)` — 파싱 오류/형식 오류/오타키 경고 |
@@ -152,13 +151,11 @@ sequenceDiagram
     H-->>U: 종료코드 + 출력
 ```
 
-### 2.2 `hctl add` (cwd/플러그인 모드 — 스캐폴드 포함)
+### 2.2 `hctl add` (스캐폴드 포함)
 
 ```mermaid
 flowchart TD
-    A[cmd_add] --> B{project_dir/CLAUDE_PROJECT_DIR<br/>또는 미등록?}
-    B -- 아니오(레거시) --> L[create_work_item<br/>project=등록명]
-    B -- 예(cwd) --> C[scaffold_project_yaml]
+    A[cmd_add] --> C[scaffold_project_yaml<br/>harness.yaml 없으면 자동 생성]
     C --> D{harness.yaml<br/>새로 생성?}
     D -- 예 --> E[detect_commands 안내 출력]
     D -- 아니오 --> F[validate_project_yaml]
@@ -166,8 +163,7 @@ flowchart TD
     F -- 치명오류 --> X[안내 후 종료 1]
     F -- ok/경고 --> G[load_project_at]
     G --> H[create_work_item<br/>project_dir 저장]
-    L --> Z[(work_items/WI-NNNN.json<br/>+ queue.jsonl + created 이벤트 + index)]
-    H --> Z
+    H --> Z[(work_items/WI-NNNN.json<br/>+ queue.jsonl + created 이벤트 + index)]
 ```
 
 ### 2.3 `advance()` — 한 단계 전진 (★ 핵심)
